@@ -40,8 +40,8 @@ jobs:
       - name: Smoke test import
         run: python -c "import m5uploader.api, m5uploader.auth_store, m5uploader.config, m5uploader.imaging, m5uploader.gui"
 
-      - name: Build standalone executable (Linux/Windows)
-        if: runner.os != 'macOS'
+      - name: Build standalone executable (Windows)
+        if: runner.os == 'Windows'
         # Building on a fresh, ephemeral CI runner (rather than a local
         # machine) means the binary never embeds a developer's own
         # username or home directory path.
@@ -50,6 +50,45 @@ jobs:
         # static analysis never sees the import and leaves it out of the
         # bundle unless it's listed explicitly.
         run: pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        # Same PyInstaller invocation as Windows, but the raw output is a
+        # bare, extensionless file - not obviously a program, and GitHub
+        # release downloads don't carry the executable bit either, so it'd
+        # need a manual chmod +x on top. AppImage is the standard fix on
+        # Linux: one recognizable, self-contained file, and "chmod +x it,
+        # run it" is a convention most Linux users already know.
+        run: |
+          pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
+
+          mkdir -p AppDir/usr/bin
+          cp "dist/${{ matrix.asset_name }}" "AppDir/usr/bin/${{ matrix.asset_name }}"
+          chmod +x "AppDir/usr/bin/${{ matrix.asset_name }}"
+
+          printf '%s\n' \
+            '#!/bin/sh' \
+            'HERE="$(dirname "$(readlink -f "${0}")")"' \
+            'exec "$HERE/usr/bin/${{ matrix.asset_name }}" "$@"' \
+            > AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+          printf '%s\n' \
+            '[Desktop Entry]' \
+            'Type=Application' \
+            'Name=m5uploader' \
+            'Exec=AppRun' \
+            'Icon=m5uploader' \
+            'Categories=Utility;' \
+            > AppDir/m5uploader.desktop
+
+          python3 -c "import base64; from ttkbootstrap.icons import Icon; open('AppDir/m5uploader.png', 'wb').write(base64.b64decode(Icon.icon))"
+
+          wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "dist/${{ matrix.asset_name }}.AppImage"
+
+          rm "dist/${{ matrix.asset_name }}"
 
       - name: Build app bundle (macOS)
         if: runner.os == 'macOS'

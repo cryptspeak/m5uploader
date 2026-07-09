@@ -8,6 +8,7 @@
   <a href="#"><img src="https://img.shields.io/badge/status-alpha-yellow.svg"></a>
   <a href="#"><img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-success.svg"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/cryptspeak/m5uploader?label=download&color=brightgreen"></a>
 </p>
 
 ---
@@ -103,7 +104,7 @@ pip install pyinstaller
 pyinstaller --onedir --windowed --name m5uploader run.py
 ```
 
-The result is written to `dist/`. CI builds this automatically for Linux, Windows, and macOS on every push (see [Build](.github/workflows/build.yml)) and attaches the three binaries to a [GitHub Release](../../releases) whenever a `v*` tag is pushed.
+The result is written to `dist/`. CI builds this automatically on every push (see [Build](.github/workflows/build.yml)) and publishes it to the [Releases](../../releases) page whenever a `v*` tag is pushed.
 
 ## Project layout
 
