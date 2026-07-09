@@ -87,11 +87,20 @@ python -m m5uploader
 
 ## Building a standalone executable
 
-A standalone, single-file executable can be built with [PyInstaller](https://pyinstaller.org/):
+A standalone executable can be built with [PyInstaller](https://pyinstaller.org/):
+
+**Linux / Windows** (single-file executable):
 
 ```sh
 pip install pyinstaller
 pyinstaller --onefile --windowed --name m5uploader run.py
+```
+
+**macOS** (`.app` bundle - PyInstaller deprecates `--onefile` combined with `--windowed` on macOS):
+
+```sh
+pip install pyinstaller
+pyinstaller --onedir --windowed --name m5uploader run.py
 ```
 
 The result is written to `dist/`. CI builds this automatically for Linux, Windows, and macOS on every push (see [Build](.github/workflows/build.yml)) and attaches the three binaries to a [GitHub Release](../../releases) whenever a `v*` tag is pushed.

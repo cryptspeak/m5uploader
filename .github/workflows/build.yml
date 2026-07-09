@@ -40,7 +40,8 @@ jobs:
       - name: Smoke test import
         run: python -c "import m5uploader.api, m5uploader.auth_store, m5uploader.config, m5uploader.imaging, m5uploader.gui"
 
-      - name: Build standalone executable
+      - name: Build standalone executable (Linux/Windows)
+        if: runner.os != 'macOS'
         # Building on a fresh, ephemeral CI runner (rather than a local
         # machine) means the binary never embeds a developer's own
         # username or home directory path.
@@ -49,6 +50,20 @@ jobs:
         # static analysis never sees the import and leaves it out of the
         # bundle unless it's listed explicitly.
         run: pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
+
+      - name: Build app bundle (macOS)
+        if: runner.os == 'macOS'
+        # --onefile + --windowed on macOS is deprecated by PyInstaller: a
+        # .app bundle can't be a single file, it fights Gatekeeper/notarization,
+        # and PyInstaller turns this into a hard error in v7.0. --onedir is
+        # what a windowed macOS build is actually supposed to use. The
+        # resulting .app is a directory, so it gets zipped for distribution -
+        # a bare Mach-O extracted from Contents/MacOS loses the icon,
+        # Info.plist, and bundle structure entirely.
+        run: |
+          pyinstaller --onedir --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
+          ditto -c -k --sequesterRsrc --keepParent "dist/${{ matrix.asset_name }}.app" "dist/${{ matrix.asset_name }}.zip"
+          rm -rf "dist/${{ matrix.asset_name }}.app"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
