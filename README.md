@@ -12,6 +12,12 @@
 
 ---
 
+## Screenshot
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="m5uploader screenshot" width="800">
+</p>
+
 ## Background
 
 [M5Burner](https://docs.m5stack.com/en/quick_start/m5burner/intro) is M5Stack's official desktop app for browsing, downloading, and publishing device firmware. While using it, I found a number of security issues in the underlying Electron app - I've written up the full findings here: **[writeup link - TBD]**.
