@@ -60,10 +60,13 @@ jobs:
         # resulting .app is a directory, so it gets zipped for distribution -
         # a bare Mach-O extracted from Contents/MacOS loses the icon,
         # Info.plist, and bundle structure entirely.
+        # --onedir builds both the plain onedir tree at dist/<name>/ and the
+        # .app bundle wrapping it at dist/<name>.app/ - only the zipped
+        # bundle should ship, so the loose onedir tree is removed too.
         run: |
           pyinstaller --onedir --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
           ditto -c -k --sequesterRsrc --keepParent "dist/${{ matrix.asset_name }}.app" "dist/${{ matrix.asset_name }}.zip"
-          rm -rf "dist/${{ matrix.asset_name }}.app"
+          rm -rf "dist/${{ matrix.asset_name }}.app" "dist/${{ matrix.asset_name }}"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
