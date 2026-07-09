@@ -44,7 +44,11 @@ jobs:
         # Building on a fresh, ephemeral CI runner (rather than a local
         # machine) means the binary never embeds a developer's own
         # username or home directory path.
-        run: pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --distpath dist run.py
+        # PIL.ImageTk registers its Tk photo-image support by synthesizing
+        # PIL._tkinter_finder in sys.modules at runtime, so PyInstaller's
+        # static analysis never sees the import and leaves it out of the
+        # bundle unless it's listed explicitly.
+        run: pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
