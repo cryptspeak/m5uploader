@@ -66,19 +66,8 @@ jobs:
         with:
           path: dist
 
-      - name: Create GitHub Release
+      - name: Upload assets to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          release_args=(--generate-notes)
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            release_args+=(--prerelease)
-          fi
-
-          assets=$(find dist -type f)
-
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" $assets --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$GITHUB_REF_NAME" $assets "${release_args[@]}" --repo "$GITHUB_REPOSITORY"
-          fi
+          gh release upload "$GITHUB_REF_NAME" $(find dist -type f) --clobber --repo "$GITHUB_REPOSITORY"
