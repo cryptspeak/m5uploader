@@ -1,0 +1,30 @@
+invenv/
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# PyInstaller spec files embed the absolute path of the machine that
+# generated them - always regenerate rather than committing one.
+*.spec
+
+# Sensitive data - session tokens / any fallback credential store
+# (the real one lives outside the repo in the OS config dir; these
+# are just a safety net against an accidental local copy)
+session.json
+credentials.json
+*.env
+*.token
+
+# Downloaded firmware binaries (can be large / user-specific)
+firmware/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
