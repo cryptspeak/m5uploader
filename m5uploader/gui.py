@@ -11,8 +11,10 @@ download/share firmware. No device manager, no on-device flashing.
 """
 
 import io
+import os
 import queue
 import re
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -1365,7 +1367,54 @@ class App(tb.Window):
             self.mine_edit_status.config(text=payload[0], bootstyle="danger")
 
 
+def _fix_frozen_tcl_modules():
+    """Register PyInstaller's bundled Tcl Modules dir with Tcl itself.
+
+    Debian/Ubuntu's Tcl 8.6 adds an extra module search root pointing at
+    the literal, hardcoded path /usr/share/tcltk/tcl8.6/tcl8 - it isn't
+    derived from TCL_LIBRARY at interpreter startup. PyInstaller bundles
+    that same tcl8/ directory (nested under the library dir it collects,
+    since that's where Debian ships it), but nothing on a frozen Linux
+    build ever points Tcl at that bundled copy, so `package require
+    msgcat` silently resolves to an older, built-in msgcat lacking
+    `mcmset` (added in msgcat 1.6) - raising "invalid command name
+    ::msgcat::mcmset" the moment ttkbootstrap initializes. This is a
+    no-op on platforms where the directory isn't bundled (Windows/macOS
+    don't hit this).
+
+    tkinter.Tk.__init__ creates the bare Tcl interpreter via
+    _tkinter.create() and only *then* loads Tk on top via _loadtk() - Tk
+    pulls in msgcat as part of its own startup, through a path that
+    doesn't appear to re-scan the module list the way a plain `package
+    require` does. So it's not enough to just register the extra module
+    root before calling the real _loadtk(): `package require msgcat`
+    also has to be forced here, priming Tcl's package cache with the
+    correct (bundled) version before Tk's own internal requirement runs
+    and quietly reuses whatever's already cached.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return
+    bundled_tm_dir = os.path.join(meipass, "_tcl_data", "tcl8")
+    if not os.path.isdir(bundled_tm_dir):
+        return
+    original_loadtk = tk.Tk._loadtk
+
+    def patched_loadtk(self):
+        self.tk.eval(f"::tcl::tm::path add {{{bundled_tm_dir}}}")
+        try:
+            self.tk.eval("package require msgcat")
+        except tk.TclError:
+            pass
+        original_loadtk(self)
+
+    tk.Tk._loadtk = patched_loadtk
+
+
 def main():
+    _fix_frozen_tcl_modules()
     app = App()
     app.mainloop()
 
