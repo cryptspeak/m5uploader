@@ -21,7 +21,7 @@
 
 ## Background
 
-[M5Burner](https://docs.m5stack.com/en/quick_start/m5burner/intro) is M5Stack's official desktop app for browsing, downloading, and publishing device firmware. While using it, I found a number of security issues in the underlying Electron app - I've written up the full findings here: **[writeup link - TBD]**.
+[M5Burner](https://docs.m5stack.com/en/quick_start/m5burner/intro) is M5Stack's official desktop app for browsing, downloading, and publishing device firmware. While using it, I found a number of security issues in the underlying Electron app - I've written up the full findings here: **[malloc.pw/2026/07/11/m5burner-is-a-mess](https://malloc.pw/2026/07/11/m5burner-is-a-mess/)**.
 
 m5uploader is a from-scratch, from-first-principles reimplementation of the account and firmware-catalog side of M5Burner, built with a much smaller attack surface. It is **not** a fork or a patched version of the official app.
 
