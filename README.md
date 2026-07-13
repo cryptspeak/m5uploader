@@ -1,7 +1,7 @@
 <h1 align="center">m5uploader</h1>
 
 <p align="center">
-  <b>A minimal, security-conscious replacement for M5Burner's account and firmware features</b>
+  <b>A minimal, security-conscious replacement for M5Burner</b>
 </p>
 
 <p align="center">
