@@ -25,7 +25,9 @@ from PIL import Image, ImageTk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y, W
 from ttkbootstrap.dialogs import Messagebox
 
-from . import __version__, auth_store, config, flashing
+from . import (
+    __version__, auth_store, catalog_cache, config, firmware_cache, flashing, image_cache,
+)
 from .api import APIError, M5StackAPI
 
 LIGHT_THEME = "flatly"
@@ -75,6 +77,11 @@ _NUM_RE = re.compile(r"(\d+)")
 def _natural_key(value):
     """Sort key that orders embedded numbers numerically (v2.1.10 after v2.1.9)."""
     return [int(part) if part.isdigit() else part.lower() for part in _NUM_RE.split(str(value))]
+
+
+def _format_age(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return "just now" if minutes < 1 else f"{minutes}m ago"
 
 
 def _latest_version(fw: dict):
@@ -860,9 +867,10 @@ class App(tb.Window):
         self.category_combo.pack(side=LEFT, padx=6)
         self.category_combo.bind("<<ComboboxSelected>>", lambda e: self._apply_filter())
 
-        tb.Button(toolbar, text="Refresh catalog", bootstyle="secondary-outline", command=self._load_catalog).pack(
-            side=RIGHT
-        )
+        tb.Button(
+            toolbar, text="Refresh catalog", bootstyle="secondary-outline",
+            command=lambda: self._load_catalog(force=True),
+        ).pack(side=RIGHT)
         tb.Button(
             toolbar, text="Redeem share code...", bootstyle="secondary-outline", command=self._on_open_share_dialog
         ).pack(side=RIGHT, padx=(0, 8))
@@ -910,20 +918,47 @@ class App(tb.Window):
         self.version_combo = tb.Combobox(version_row, textvariable=self.version_var, width=18, state="readonly")
         self.version_combo.pack(side=LEFT, padx=8)
 
+        download_row = tb.Frame(detail)
+        download_row.pack(anchor=W)
         self.download_btn = tb.Button(
-            detail, text="Download...", bootstyle="success", command=self._on_download_firmware, state="disabled"
+            download_row, text="Download...", bootstyle="success", command=self._on_download_firmware,
+            state="disabled",
         )
-        self.download_btn.pack(anchor=W)
+        self.download_btn.pack(side=LEFT)
+        self.flash_from_catalog_btn = tb.Button(
+            download_row, text="Flash...", bootstyle="warning", command=self._on_flash_from_catalog,
+            state="disabled",
+        )
+        self.flash_from_catalog_btn.pack(side=LEFT, padx=(8, 0))
 
         self.browse_progress = tb.Progressbar(detail, variable=self.progress_var, maximum=100, bootstyle="success")
         self.browse_progress.pack(fill=X, pady=(10, 0))
 
-    def _load_catalog(self):
+    def _set_catalog(self, catalog):
+        self._catalog = catalog
+        self._fw_by_fid = {fw["fid"]: fw for fw in catalog}
+        categories = sorted({fw.get("category", "") for fw in catalog if fw.get("category")}, key=device_label)
+        self._category_value_by_label = {device_label(c): c for c in categories}
+        self.category_combo["values"] = ["All devices", *(device_label(c) for c in categories)]
+        self._known_categories = categories
+        self._apply_filter()
+
+    def _load_catalog(self, force=False):
+        if not force:
+            cached = catalog_cache.load_cached_catalog()
+            if cached is not None:
+                self._set_catalog(cached)
+                age = catalog_cache.cache_age()
+                if age is not None:
+                    self.catalog_status.config(text=f"{self.catalog_status.cget('text')} (cached {_format_age(age)})")
+                return
+
         self.catalog_status.config(text="Loading catalog...")
 
         def worker():
             try:
                 catalog = self.api.list_firmware()
+                catalog_cache.save_cached_catalog(catalog)
                 self.msg_queue.put(("catalog", catalog))
             except APIError as exc:
                 self.msg_queue.put(("catalog_err", str(exc)))
@@ -1011,9 +1046,11 @@ class App(tb.Window):
         if versions:
             self.version_var.set(versions[-1])
             self.download_btn.config(state="normal")
+            self.flash_from_catalog_btn.config(state="normal")
         else:
             self.version_var.set("")
             self.download_btn.config(state="disabled")
+            self.flash_from_catalog_btn.config(state="disabled")
 
         self.cover_label.config(image="", text="")
         cover = fw.get("cover")
@@ -1026,8 +1063,20 @@ class App(tb.Window):
                 threading.Thread(target=self._fetch_cover, args=(fid, cover, "browse"), daemon=True).start()
 
     def _fetch_cover(self, key, cover, target):
+        cached = image_cache.load_cached_image(cover)
+        if cached is not None:
+            try:
+                image = Image.open(io.BytesIO(cached))
+                image.load()
+                image.thumbnail((280, 280))
+                self.msg_queue.put(("cover", key, cover, image, target))
+                return
+            except OSError:
+                pass  # corrupt cache entry - fall through and re-fetch
+
         try:
             data = self.api.fetch_cover_image(cover)
+            image_cache.save_cached_image(cover, data)
             image = Image.open(io.BytesIO(data))
             image.load()
             image.thumbnail((280, 280))
@@ -1059,6 +1108,46 @@ class App(tb.Window):
                 self.msg_queue.put(("info", f"Downloaded to {dest}"))
             except APIError as exc:
                 self.msg_queue.put(("error", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_flash_from_catalog(self):
+        """Download the selected version straight into the local
+        firmware cache (skipping the download entirely if it's already
+        cached), then switch to the Flash Firmware tab with the file
+        pre-filled so the user can pick a port/settings and flash it -
+        no separate manual download step needed. The
+        ordinary "Download..." button is untouched and still always asks
+        where to save."""
+        fw = self._fw_by_fid.get(self._selected_fid)
+        if not fw:
+            return
+        version = next((v for v in fw.get("versions", []) if v["version"] == self.version_var.get()), None)
+        if not version:
+            return
+        filename = version["file"]
+        dest = firmware_cache.cache_path(filename)
+
+        if firmware_cache.is_cached(filename):
+            self.flash_file_var.set(str(dest))
+            self.notebook.select(self.flash_tab)
+            return
+
+        firmware_cache.ensure_dir()
+        self.flash_from_catalog_btn.config(state="disabled", text="Downloading...")
+
+        def worker():
+            try:
+                self.progress_var.set(0)
+
+                def progress(frac):
+                    self.msg_queue.put(("progress", frac * 100))
+
+                self.api.download_firmware(filename, dest, progress)
+                firmware_cache.evict_if_needed()
+                self.msg_queue.put(("flash_from_catalog_ok", str(dest)))
+            except APIError as exc:
+                self.msg_queue.put(("flash_from_catalog_err", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -1327,14 +1416,7 @@ class App(tb.Window):
                 bootstyle="danger",
             )
         elif kind == "catalog":
-            catalog = payload[0]
-            self._catalog = catalog
-            self._fw_by_fid = {fw["fid"]: fw for fw in catalog}
-            categories = sorted({fw.get("category", "") for fw in catalog if fw.get("category")}, key=device_label)
-            self._category_value_by_label = {device_label(c): c for c in categories}
-            self.category_combo["values"] = ["All devices", *(device_label(c) for c in categories)]
-            self._known_categories = categories
-            self._apply_filter()
+            self._set_catalog(payload[0])
         elif kind == "catalog_err":
             self.catalog_status.config(text="Failed to load catalog")
             Messagebox.show_error(payload[0], "m5uploader")
@@ -1396,6 +1478,13 @@ class App(tb.Window):
             self._flash_cancel_event = None
             self.flash_btn.config(state="normal")
             self.flash_cancel_btn.config(state="disabled")
+            Messagebox.show_error(payload[0], "m5uploader")
+        elif kind == "flash_from_catalog_ok":
+            self.flash_from_catalog_btn.config(state="normal", text="Flash...")
+            self.flash_file_var.set(payload[0])
+            self.notebook.select(self.flash_tab)
+        elif kind == "flash_from_catalog_err":
+            self.flash_from_catalog_btn.config(state="normal", text="Flash...")
             Messagebox.show_error(payload[0], "m5uploader")
 
     # ------------------------------------------------------------------

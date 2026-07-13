@@ -40,7 +40,7 @@ Log in with your M5Stack account email/password; the session token is persisted 
 
 ### Browse Firmware
 
-The full public firmware catalog, searchable and filterable by device, with cover art, descriptions, and per-version downloads. Redeem a share code someone sent you from a small dialog in the toolbar.
+The full public firmware catalog, searchable and filterable by device, with cover art, descriptions, and per-version downloads. Redeem a share code someone sent you from a small dialog in the toolbar. The catalog (and its cover images) are cached locally so switching to this tab doesn't always re-fetch everything - "Refresh catalog" always bypasses the catalog cache, and the status line is honest about whether you're looking at a cached or freshly-fetched list. Each entry also has a **Flash...** button next to Download - it downloads straight into a local cache (skipping the download if it's already cached), then jumps you to the Flash Firmware tab with the file pre-loaded so you can pick a port and go. The ordinary Download button is unchanged and still always asks where to save.
 
 ### My Firmware
 
@@ -48,7 +48,7 @@ Everything published under your account: publish a new firmware or add a version
 
 ### Flash Firmware
 
-Flash a `.bin` straight to a connected M5Stack device: pick the serial port (likely M5Stack ports, detected by USB vendor/product ID, are pre-selected), pick the file, optionally erase the whole flash first, and go. A live log and a progress bar are shown throughout, with esptool's terminal escape codes and repeated progress lines filtered out so the log stays readable. Flashing is done entirely with [esptool](https://github.com/espressif/esptool), invoked as an isolated subprocess (never imported into this process - see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for why).
+Flash a `.bin` straight to a connected M5Stack device: pick the serial port (likely M5Stack ports, detected by USB vendor/product ID, are pre-selected), pick the file (or arrive here pre-loaded via a catalog entry's Flash button), optionally erase the whole flash first, and go. A live log and a progress bar are shown throughout, with esptool's terminal escape codes and repeated progress lines filtered out so the log stays readable. Flashing is done entirely with [esptool](https://github.com/espressif/esptool), invoked as an isolated subprocess (never imported into this process - see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for why).
 
 m5uploader never requests elevated privileges to do this. On Linux, if opening the port fails with a permission error, add yourself to the `dialout` group (`sudo usermod -aG dialout $USER`, then log out and back in) rather than running the app as root. On Windows and older macOS you may also need the board's USB-serial driver installed (Silicon Labs CP210x or WCH CH9102, depending on the board) - this is an OS/driver-level requirement outside the app's control.
 
@@ -117,20 +117,32 @@ cp dist/m5uploader-esptool dist/m5uploader.app/Contents/MacOS/m5uploader-esptool
 
 The result is written to `dist/`. CI builds this automatically on every push (see [Build](.github/workflows/build.yml)) and publishes it to the [Releases](../../releases) page whenever a `v*` tag is pushed.
 
+## Local caches
+
+Everything below lives in your OS's proper *cache* directory - `~/.cache/m5uploader` on Linux (or `$XDG_CACHE_HOME`), `~/Library/Caches/m5uploader` on macOS, `%LOCALAPPDATA%\m5uploader` on Windows - deliberately separate from the config directory the session token lives in (see `config.py`), so a system "clear cache" tool can safely wipe all of this without touching your login. Every cache is written atomically and `0600`-permissioned; any missing, stale, or corrupted entry is simply treated as a cache miss and re-fetched, never trusted blindly.
+
+- **Catalog** (`catalog_cache.json`) - the public firmware catalog, cached for 15 minutes so switching to Browse Firmware doesn't always re-fetch it. "My Firmware" (your own, authenticated firmware list) is never cached, since it changes whenever you edit it.
+- **Cover images** (`covers/`) - keyed by a hash of the cover's server identifier, never the identifier itself (path-traversal defense-in-depth), capped at 150 MB total with oldest-first eviction.
+- **Downloaded firmware** (`firmware/`) - only used by the catalog's Flash button shortcut (see Flash Firmware above), capped at 1.5 GB total with oldest-first eviction. The ordinary Download button doesn't use this cache at all - it always saves exactly where you tell it to.
+
 ## Project layout
 
 ```
 m5uploader/
   m5uploader/
-    api.py           M5Stack API client (login, catalog, share codes,
-                      publish/edit/delete/visibility, cover compression)
-    auth_store.py    Plain 0600-permissioned token storage (token + username)
-    config.py        Paths / hosts
-    flashing.py      On-device flashing via an isolated esptool subprocess
-    gui.py           ttkbootstrap GUI (Account / Browse Firmware /
-                      My Firmware / Flash Firmware)
-  esptool_helper.py   PyInstaller entry point for the bundled esptool helper
-  run.py              PyInstaller entry point for the main app
+    api.py             M5Stack API client (login, catalog, share codes,
+                        publish/edit/delete/visibility, cover compression)
+    auth_store.py      Plain 0600-permissioned token storage (token + username)
+    catalog_cache.py   Local cache of the public firmware catalog
+    config.py          Paths / hosts
+    firmware_cache.py  Local cache of firmware downloaded via the catalog's
+                        Flash button shortcut
+    flashing.py        On-device flashing via an isolated esptool subprocess
+    gui.py             ttkbootstrap GUI (Account / Browse Firmware /
+                        My Firmware / Flash Firmware)
+    image_cache.py     Local cache of firmware cover images
+  esptool_helper.py     PyInstaller entry point for the bundled esptool helper
+  run.py                PyInstaller entry point for the main app
   requirements.txt
 ```
 

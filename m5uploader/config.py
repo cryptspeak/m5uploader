@@ -31,11 +31,30 @@ def _config_home() -> Path:
     return Path(base) / APP_NAME
 
 
+def _cache_home() -> Path:
+    """Separate from CONFIG_DIR on purpose: catalog/image/firmware caches
+    are disposable, regenerable data (right home: ~/.cache, %LOCALAPPDATA%,
+    ~/Library/Caches), not configuration or credentials. Keeping them out
+    of CONFIG_DIR also means a user/system "clear cache" tool can safely
+    wipe this directory without touching the session token."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = str(Path.home() / "Library" / "Caches")
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / APP_NAME
+
+
 CONFIG_DIR = _config_home()
 SESSION_FILE = CONFIG_DIR / "session.json"
+
+CACHE_DIR = _cache_home()
 
 
 def ensure_dirs() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
     if os.name == "posix":
         os.chmod(CONFIG_DIR, 0o700)
+        os.chmod(CACHE_DIR, 0o700)
