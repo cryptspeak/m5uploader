@@ -29,7 +29,7 @@ m5uploader is a from-scratch, from-first-principles reimplementation of the acco
 
 - **HTTPS-only.** Every request goes to the real M5Stack API over HTTPS with TLS verification on (the default `requests` behavior - never disabled). No plaintext HTTP, ever.
 - **No embedded browser.** The GUI is native [ttkbootstrap](https://ttkbootstrap.readthedocs.io/) (themed `ttk`) - no Chromium, no Node, no remote page ever loaded into the app. Same look on Linux, Windows, and macOS, with a light/dark toggle.
-- **Password isn't stored.** Only the session token is persisted, in a plain `0600`-permissioned file rather than an OS keychain, which on Linux depends on a Secret Service backend that isn't always present or unlocked.
+- **Password isn't stored.** Only the session token is persisted - in your OS keychain when one is actually available and working, otherwise (transparently, with no broken login) in a plain `0600`-permissioned file. See [Session token storage](#session-token-storage) below for details.
 - **Honest login state.** The saved token is checked on startup against an endpoint that actually requires auth, not just the public catalog. If it's no longer valid, you're asked to log in again instead of the UI pretending you're still logged in.
 - **No automatic telemetry.** `ping_firmware_download()` exists for the same analytics endpoint the official app pings on every download, but the GUI never calls it.
 - **No OS-specific shell-outs.** Same codebase, same behavior on Linux, Windows, and macOS.
@@ -117,6 +117,10 @@ cp dist/m5uploader-esptool dist/m5uploader.app/Contents/MacOS/m5uploader-esptool
 
 The result is written to `dist/`. CI builds this automatically on every push (see [Build](.github/workflows/build.yml)) and publishes it to the [Releases](../../releases) page whenever a `v*` tag is pushed.
 
+## Session token storage
+
+The session token (never the password - see Features above) is stored in your OS keychain (macOS Keychain, Windows Credential Locker, or Linux Secret Service via `keyring`) whenever one is actually present and working. On Linux, a keychain depends on a Secret Service backend (GNOME Keyring/KWallet) that isn't always present or unlocked, and a broken keychain can be hard to tell apart from "the token is invalid" - so on startup, m5uploader actually sets a value, reads it back, and deletes it to confirm the keychain works, rather than just checking that a backend object was constructed. If that check fails, it falls back to a plain `0600`-permissioned file instead, and login still works normally. An existing plain-file session is migrated into the keychain (and the plaintext copy removed) automatically the first time a working keychain is seen.
+
 ## Local caches
 
 Everything below lives in your OS's proper *cache* directory - `~/.cache/m5uploader` on Linux (or `$XDG_CACHE_HOME`), `~/Library/Caches/m5uploader` on macOS, `%LOCALAPPDATA%\m5uploader` on Windows - deliberately separate from the config directory the session token lives in (see `config.py`), so a system "clear cache" tool can safely wipe all of this without touching your login. Every cache is written atomically and `0600`-permissioned; any missing, stale, or corrupted entry is simply treated as a cache miss and re-fetched, never trusted blindly.
@@ -132,7 +136,8 @@ m5uploader/
   m5uploader/
     api.py             M5Stack API client (login, catalog, share codes,
                         publish/edit/delete/visibility, cover compression)
-    auth_store.py      Plain 0600-permissioned token storage (token + username)
+    auth_store.py      Session token storage: OS keychain, falling back to
+                        a plain 0600-permissioned file (token + username)
     catalog_cache.py   Local cache of the public firmware catalog
     config.py          Paths / hosts
     firmware_cache.py  Local cache of firmware downloaded via the catalog's
