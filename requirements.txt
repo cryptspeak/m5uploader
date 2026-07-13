@@ -1,3 +1,10 @@
 requests>=2.31,<3
 ttkbootstrap>=1.10,<2
 Pillow>=10,<12
+
+# Flashing: pyserial is imported directly (MIT); esptool (GPLv2+) is only
+# ever invoked as an isolated subprocess, never imported by the main app -
+# see m5uploader/flashing.py and THIRD_PARTY_LICENSES.md. It's still a
+# normal pip dependency here so `python -m esptool` works from source.
+pyserial>=3.5,<4
+esptool>=5,<6

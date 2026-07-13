@@ -38,7 +38,20 @@ jobs:
           pip install pyinstaller
 
       - name: Smoke test import
-        run: python -c "import m5uploader.api, m5uploader.auth_store, m5uploader.config, m5uploader.imaging, m5uploader.gui"
+        run: python -c "import m5uploader.api, m5uploader.auth_store, m5uploader.config, m5uploader.imaging, m5uploader.gui, m5uploader.flashing, m5uploader.catalog_cache, m5uploader.update_check"
+
+      # esptool (GPLv2+) is only ever invoked as an isolated subprocess by
+      # the main app (see m5uploader/flashing.py, THIRD_PARTY_LICENSES.md)
+      # - never imported into it. In frozen builds that means a second,
+      # separate PyInstaller executable, built from esptool_helper.py and
+      # shipped alongside the main binary, which m5uploader/flashing.py
+      # locates next to sys.executable at runtime.
+      #
+      # keyring's backend discovery is entry-point/importlib.metadata based,
+      # which PyInstaller's static analysis can miss - each OS build below
+      # explicitly hidden-imports its own concrete backend module (also
+      # explicitly selected at runtime in auth_store.py) rather than relying
+      # on auto-discovery working inside a frozen build.
 
       - name: Build standalone executable (Windows)
         if: runner.os == 'Windows'
@@ -49,7 +62,15 @@ jobs:
         # PIL._tkinter_finder in sys.modules at runtime, so PyInstaller's
         # static analysis never sees the import and leaves it out of the
         # bundle unless it's listed explicitly.
-        run: pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
+        # The esptool helper ships as a second .exe next to the main one -
+        # both get zipped together so the release is still a single
+        # download, matching the "one file" experience of the other OSes.
+        run: |
+          pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --hidden-import keyring.backends.Windows --distpath dist run.py
+          pyinstaller --onefile --console --name "m5uploader-esptool.exe" --distpath dist esptool_helper.py
+
+          Compress-Archive -Path "dist/${{ matrix.asset_name }}","dist/m5uploader-esptool.exe" -DestinationPath "dist/m5uploader-windows.zip"
+          Remove-Item "dist/${{ matrix.asset_name }}","dist/m5uploader-esptool.exe"
 
       - name: Build AppImage (Linux)
         if: runner.os == 'Linux'
@@ -59,12 +80,16 @@ jobs:
         # need a manual chmod +x on top. AppImage is the standard fix on
         # Linux: one recognizable, self-contained file, and "chmod +x it,
         # run it" is a convention most Linux users already know.
+        # The esptool helper is built the same way and placed in the same
+        # AppDir/usr/bin, so it ships inside the one AppImage file too.
         run: |
-          pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
+          pyinstaller --onefile --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --hidden-import keyring.backends.SecretService --distpath dist run.py
+          pyinstaller --onefile --console --name "m5uploader-esptool" --distpath dist esptool_helper.py
 
           mkdir -p AppDir/usr/bin
           cp "dist/${{ matrix.asset_name }}" "AppDir/usr/bin/${{ matrix.asset_name }}"
-          chmod +x "AppDir/usr/bin/${{ matrix.asset_name }}"
+          cp "dist/m5uploader-esptool" "AppDir/usr/bin/m5uploader-esptool"
+          chmod +x "AppDir/usr/bin/${{ matrix.asset_name }}" "AppDir/usr/bin/m5uploader-esptool"
 
           printf '%s\n' \
             '#!/bin/sh' \
@@ -88,7 +113,7 @@ jobs:
           chmod +x appimagetool
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "dist/${{ matrix.asset_name }}.AppImage"
 
-          rm "dist/${{ matrix.asset_name }}"
+          rm "dist/${{ matrix.asset_name }}" "dist/m5uploader-esptool"
 
       - name: Build app bundle (macOS)
         if: runner.os == 'macOS'
@@ -102,10 +127,15 @@ jobs:
         # --onedir builds both the plain onedir tree at dist/<name>/ and the
         # .app bundle wrapping it at dist/<name>.app/ - only the zipped
         # bundle should ship, so the loose onedir tree is removed too.
+        # The esptool helper is copied into the bundle's own Contents/MacOS
+        # so it ships inside the one .app/.zip too.
         run: |
-          pyinstaller --onedir --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --distpath dist run.py
+          pyinstaller --onedir --windowed --name "${{ matrix.asset_name }}" --hidden-import PIL._tkinter_finder --hidden-import keyring.backends.macOS --distpath dist run.py
+          pyinstaller --onefile --console --name "m5uploader-esptool" --distpath dist esptool_helper.py
+          cp "dist/m5uploader-esptool" "dist/${{ matrix.asset_name }}.app/Contents/MacOS/m5uploader-esptool"
+          chmod +x "dist/${{ matrix.asset_name }}.app/Contents/MacOS/m5uploader-esptool"
           ditto -c -k --sequesterRsrc --keepParent "dist/${{ matrix.asset_name }}.app" "dist/${{ matrix.asset_name }}.zip"
-          rm -rf "dist/${{ matrix.asset_name }}.app" "dist/${{ matrix.asset_name }}"
+          rm -rf "dist/${{ matrix.asset_name }}.app" "dist/${{ matrix.asset_name }}" "dist/m5uploader-esptool"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

@@ -46,9 +46,15 @@ The full public firmware catalog, searchable and filterable by device, with cove
 
 Everything published under your account: publish a new firmware or add a version to an existing one, edit metadata/files, toggle public/private visibility, delete a version, and create/rotate share codes.
 
+### Flash Firmware
+
+Flash a `.bin` straight to a connected M5Stack device: pick the serial port (likely M5Stack ports, detected by USB vendor/product ID, are pre-selected), pick the file, optionally erase the whole flash first, and go. A live log and a progress bar are shown throughout, with esptool's terminal escape codes and repeated progress lines filtered out so the log stays readable. Flashing is done entirely with [esptool](https://github.com/espressif/esptool), invoked as an isolated subprocess (never imported into this process - see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for why).
+
+m5uploader never requests elevated privileges to do this. On Linux, if opening the port fails with a permission error, add yourself to the `dialout` group (`sudo usermod -aG dialout $USER`, then log out and back in) rather than running the app as root. On Windows and older macOS you may also need the board's USB-serial driver installed (Silicon Labs CP210x or WCH CH9102, depending on the board) - this is an OS/driver-level requirement outside the app's control.
+
 ### Planned
 
-**On-device flashing** is planned but not yet implemented - it's being held back until the account/firmware API integration above is fully solid. Currently out of scope by design: an in-app device manager, and in-app account registration.
+Currently out of scope by design: an in-app device manager (beyond the port picker above), and in-app account registration.
 
 ## Running from source
 
@@ -88,20 +94,25 @@ python -m m5uploader
 
 ## Building a standalone executable
 
-A standalone executable can be built with [PyInstaller](https://pyinstaller.org/):
+A standalone executable can be built with [PyInstaller](https://pyinstaller.org/). This now builds **two** executables: the main app (`run.py`) and a separate esptool helper (`esptool_helper.py`) used for flashing (see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for why flashing is a separate binary rather than an import).
 
-**Linux / Windows** (single-file executable):
+**Linux / Windows** (single-file executables):
 
 ```sh
 pip install pyinstaller
 pyinstaller --onefile --windowed --name m5uploader run.py
+pyinstaller --onefile --console --name m5uploader-esptool esptool_helper.py
 ```
+
+Put both executables in the same directory before running - `m5uploader` looks for `m5uploader-esptool[.exe]` next to itself. CI packages them together (an AppImage on Linux, a zip on Windows) so a normal release download is still just one file/archive.
 
 **macOS** (`.app` bundle - PyInstaller deprecates `--onefile` combined with `--windowed` on macOS):
 
 ```sh
 pip install pyinstaller
 pyinstaller --onedir --windowed --name m5uploader run.py
+pyinstaller --onefile --console --name m5uploader-esptool esptool_helper.py
+cp dist/m5uploader-esptool dist/m5uploader.app/Contents/MacOS/m5uploader-esptool
 ```
 
 The result is written to `dist/`. CI builds this automatically on every push (see [Build](.github/workflows/build.yml)) and publishes it to the [Releases](../../releases) page whenever a `v*` tag is pushed.
@@ -115,14 +126,19 @@ m5uploader/
                       publish/edit/delete/visibility, cover compression)
     auth_store.py    Plain 0600-permissioned token storage (token + username)
     config.py        Paths / hosts
-    gui.py           ttkbootstrap GUI (Account / Browse Firmware / My Firmware)
-  run.py             PyInstaller entry point
+    flashing.py      On-device flashing via an isolated esptool subprocess
+    gui.py           ttkbootstrap GUI (Account / Browse Firmware /
+                      My Firmware / Flash Firmware)
+  esptool_helper.py   PyInstaller entry point for the bundled esptool helper
+  run.py              PyInstaller entry point for the main app
   requirements.txt
 ```
 
 ## Security
 
 Found a security issue in m5uploader itself? Please open an issue.
+
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for the one deliberate exception to this project's otherwise-permissive dependency licensing (esptool, GPLv2+, used only as an isolated subprocess).
 
 ## License
 

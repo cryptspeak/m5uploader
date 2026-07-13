@@ -25,7 +25,7 @@ from PIL import Image, ImageTk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y, W
 from ttkbootstrap.dialogs import Messagebox
 
-from . import __version__, auth_store, config
+from . import __version__, auth_store, config, flashing
 from .api import APIError, M5StackAPI
 
 LIGHT_THEME = "flatly"
@@ -592,6 +592,13 @@ class App(tb.Window):
         self.version_var = tk.StringVar()
         self.progress_var = tk.DoubleVar(value=0)
 
+        self.flash_port_var = tk.StringVar()
+        self.flash_file_var = tk.StringVar()
+        self.flash_erase_var = tk.BooleanVar(value=False)
+        self.flash_progress_var = tk.DoubleVar(value=0)
+        self._flash_ports_by_label = {}
+        self._flash_cancel_event = None
+
         self._catalog = []
         self._filtered_fids = []
         self._fw_by_fid = {}
@@ -650,14 +657,17 @@ class App(tb.Window):
         self.account_tab = tb.Frame(notebook, padding=16)
         self.browse_tab = tb.Frame(notebook, padding=16)
         self.mine_tab = tb.Frame(notebook, padding=16)
+        self.flash_tab = tb.Frame(notebook, padding=16)
 
         notebook.add(self.account_tab, text="Account")
         notebook.add(self.browse_tab, text="Browse Firmware")
         notebook.add(self.mine_tab, text="My Firmware")
+        notebook.add(self.flash_tab, text="Flash Firmware")
 
         self._build_account_tab()
         self._build_browse_tab()
         self._build_mine_tab()
+        self._build_flash_tab()
 
         notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
@@ -1365,6 +1375,158 @@ class App(tb.Window):
             self._load_own_firmware()
         elif kind == "visibility_err":
             self.mine_edit_status.config(text=payload[0], bootstyle="danger")
+        elif kind == "flash_line":
+            self.flash_log.configure(state="normal")
+            self.flash_log.insert(END, payload[0] + "\n")
+            self.flash_log.see(END)
+            self.flash_log.configure(state="disabled")
+        elif kind == "flash_progress":
+            self.flash_progress_var.set(payload[0])
+        elif kind == "flash_ok":
+            self._flash_cancel_event = None
+            self.flash_btn.config(state="normal")
+            self.flash_cancel_btn.config(state="disabled")
+            Messagebox.show_info("Flashing complete.", "m5uploader")
+        elif kind == "flash_cancelled":
+            self._flash_cancel_event = None
+            self.flash_btn.config(state="normal")
+            self.flash_cancel_btn.config(state="disabled")
+            self.flash_progress_var.set(0)
+        elif kind == "flash_err":
+            self._flash_cancel_event = None
+            self.flash_btn.config(state="normal")
+            self.flash_cancel_btn.config(state="disabled")
+            Messagebox.show_error(payload[0], "m5uploader")
+
+    # ------------------------------------------------------------------
+    # flash firmware tab
+    # ------------------------------------------------------------------
+
+    def _build_flash_tab(self):
+        f = self.flash_tab
+
+        port_row = tb.Frame(f)
+        port_row.pack(fill=X, pady=6)
+        tb.Label(port_row, text="Serial port", width=14, anchor=W).pack(side=LEFT)
+        self.flash_port_combo = tb.Combobox(
+            port_row, textvariable=self.flash_port_var, width=42, state="readonly"
+        )
+        self.flash_port_combo.pack(side=LEFT, padx=8)
+        tb.Button(
+            port_row, text="Refresh ports", bootstyle="secondary-outline", command=self._refresh_serial_ports
+        ).pack(side=LEFT)
+
+        file_row = tb.Frame(f)
+        file_row.pack(fill=X, pady=6)
+        tb.Label(file_row, text="Firmware (.bin)", width=14, anchor=W).pack(side=LEFT)
+        tb.Entry(file_row, textvariable=self.flash_file_var).pack(side=LEFT, padx=8, fill=X, expand=True)
+        tb.Button(
+            file_row, text="Browse...", bootstyle="secondary-outline", command=self._on_browse_flash_firmware
+        ).pack(side=LEFT)
+
+        tb.Checkbutton(
+            f, text="Erase entire flash first", variable=self.flash_erase_var, bootstyle="round-toggle"
+        ).pack(anchor=W, pady=(4, 10))
+
+        action_row = tb.Frame(f)
+        action_row.pack(fill=X, pady=(0, 10))
+        self.flash_btn = tb.Button(action_row, text="Flash", bootstyle="success", command=self._on_flash)
+        self.flash_btn.pack(side=LEFT)
+        self.flash_cancel_btn = tb.Button(
+            action_row, text="Cancel", bootstyle="danger-outline", command=self._on_cancel_flash, state="disabled"
+        )
+        self.flash_cancel_btn.pack(side=LEFT, padx=(8, 0))
+
+        self.flash_progress = tb.Progressbar(
+            f, variable=self.flash_progress_var, maximum=100, bootstyle="success"
+        )
+        self.flash_progress.pack(fill=X, pady=(0, 10))
+
+        log_frame = tb.Labelframe(f, text="esptool output", padding=6)
+        log_frame.pack(fill=BOTH, expand=True)
+        self.flash_log = tk.Text(log_frame, height=14, wrap="word", state="disabled")
+        self.flash_log.pack(fill=BOTH, expand=True)
+
+        tb.Label(
+            f,
+            text="On Linux, your user may need to be in the 'dialout' group to access serial ports "
+                 "(e.g. `sudo usermod -aG dialout $USER`, then log out and back in) - never run this "
+                 "app as root/sudo to work around a permission error instead.",
+            bootstyle="secondary", wraplength=760, justify=LEFT,
+        ).pack(anchor=W, pady=(8, 0))
+
+        self._refresh_serial_ports()
+
+    def _refresh_serial_ports(self):
+        ports = flashing.list_serial_ports()
+        self._flash_ports_by_label = {}
+        labels = []
+        default_label = None
+        for p in ports:
+            label = f"{p.device} - {p.description}" + (" (likely M5Stack)" if p.likely else "")
+            labels.append(label)
+            self._flash_ports_by_label[label] = p.device
+            if p.likely and default_label is None:
+                default_label = label
+
+        self.flash_port_combo["values"] = labels
+        if labels:
+            self.flash_port_var.set(default_label or labels[0])
+        else:
+            self.flash_port_var.set("")
+
+    def _on_browse_flash_firmware(self):
+        path = filedialog.askopenfilename(
+            title="Select firmware .bin", filetypes=[("Firmware binary", "*.bin"), ("All files", "*.*")],
+        )
+        if path:
+            self.flash_file_var.set(path)
+
+    def _on_flash(self):
+        port = self._flash_ports_by_label.get(self.flash_port_var.get())
+        file_path = self.flash_file_var.get().strip()
+        if not port:
+            Messagebox.show_warning("Select a serial port first.", "m5uploader")
+            return
+        if not file_path:
+            Messagebox.show_warning("Select a firmware .bin file first.", "m5uploader")
+            return
+        if Messagebox.yesno(
+            f"This will overwrite the firmware on {port}. Continue?", "m5uploader", localize=False
+        ) != "Yes":
+            return
+
+        self.flash_log.configure(state="normal")
+        self.flash_log.delete("1.0", END)
+        self.flash_log.configure(state="disabled")
+        self.flash_progress_var.set(0)
+        self.flash_btn.config(state="disabled")
+        self.flash_cancel_btn.config(state="normal")
+
+        erase = self.flash_erase_var.get()
+        cancel_event = threading.Event()
+        self._flash_cancel_event = cancel_event
+
+        def worker():
+            try:
+                flashing.flash_firmware(
+                    port, file_path, erase=erase,
+                    on_line=lambda line: self.msg_queue.put(("flash_line", line)),
+                    on_progress=lambda pct: self.msg_queue.put(("flash_progress", pct)),
+                    cancel_event=cancel_event,
+                )
+                self.msg_queue.put(("flash_ok",))
+            except flashing.FlashCancelled:
+                self.msg_queue.put(("flash_cancelled",))
+            except flashing.FlashError as exc:
+                self.msg_queue.put(("flash_err", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_cancel_flash(self):
+        if self._flash_cancel_event is not None:
+            self._flash_cancel_event.set()
+            self.flash_cancel_btn.config(state="disabled")
 
 
 def _fix_frozen_tcl_modules():
