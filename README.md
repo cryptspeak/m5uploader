@@ -33,6 +33,7 @@ m5uploader is a from-scratch, from-first-principles reimplementation of the acco
 - **Honest login state.** The saved token is checked on startup against an endpoint that actually requires auth, not just the public catalog. If it's no longer valid, you're asked to log in again instead of the UI pretending you're still logged in.
 - **No automatic telemetry.** `ping_firmware_download()` exists for the same analytics endpoint the official app pings on every download, but the GUI never calls it.
 - **No OS-specific shell-outs.** Same codebase, same behavior on Linux, Windows, and macOS.
+- **No auto-updater.** m5uploader checks GitHub Releases for a newer version and shows a dismissible notice - it never downloads or runs anything on its own. An auto-updater is itself a remote-code-execution vector; you review and install updates yourself.
 
 ### Account
 
@@ -146,6 +147,7 @@ m5uploader/
     gui.py             ttkbootstrap GUI (Account / Browse Firmware /
                         My Firmware / Flash Firmware)
     image_cache.py     Local cache of firmware cover images
+    update_check.py    Passive "an update is available" notice (no auto-updater)
   esptool_helper.py     PyInstaller entry point for the bundled esptool helper
   run.py                PyInstaller entry point for the main app
   requirements.txt

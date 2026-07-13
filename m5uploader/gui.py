@@ -26,7 +26,7 @@ from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y, W
 from ttkbootstrap.dialogs import Messagebox
 
 from . import (
-    __version__, auth_store, catalog_cache, config, firmware_cache, flashing, image_cache,
+    __version__, auth_store, catalog_cache, config, firmware_cache, flashing, image_cache, update_check,
 )
 from .api import APIError, M5StackAPI
 
@@ -605,6 +605,7 @@ class App(tb.Window):
         self.flash_progress_var = tk.DoubleVar(value=0)
         self._flash_ports_by_label = {}
         self._flash_cancel_event = None
+        self._update_url = None
 
         self._catalog = []
         self._filtered_fids = []
@@ -627,6 +628,7 @@ class App(tb.Window):
         self._build_layout()
         self._try_restore_session()
         self.after(150, self._poll_queue)
+        self.after(2000, self._check_for_update)
 
     # ------------------------------------------------------------------
     # top-level layout
@@ -656,6 +658,18 @@ class App(tb.Window):
         )
         tb.Label(top, textvariable=self.username_var, bootstyle="secondary").pack(side=LEFT, padx=16)
         tb.Button(top, text="Toggle dark mode", bootstyle="link", command=self._toggle_theme).pack(side=RIGHT)
+
+        # Hidden until _check_for_update() finds a newer release. Purely
+        # informational - clicking it just opens the GitHub release page
+        # in the user's own browser (see _on_update_click); nothing is
+        # ever downloaded or run automatically.
+        self.update_banner = tb.Frame(top)
+        self.update_label = tb.Label(self.update_banner, text="", bootstyle="warning", cursor="hand2")
+        self.update_label.pack(side=LEFT)
+        self.update_label.bind("<Button-1>", self._on_update_click)
+        tb.Button(
+            self.update_banner, text="×", bootstyle="link", width=2, command=self.update_banner.pack_forget
+        ).pack(side=LEFT)
 
         notebook = tb.Notebook(self)
         notebook.pack(fill=BOTH, expand=True, padx=10, pady=10)
@@ -1479,6 +1493,11 @@ class App(tb.Window):
             self.flash_btn.config(state="normal")
             self.flash_cancel_btn.config(state="disabled")
             Messagebox.show_error(payload[0], "m5uploader")
+        elif kind == "update_available":
+            info = payload[0]
+            self._update_url = info.url
+            self.update_label.config(text=f"{info.tag} is available")
+            self.update_banner.pack(side=RIGHT, padx=(0, 12))
         elif kind == "flash_from_catalog_ok":
             self.flash_from_catalog_btn.config(state="normal", text="Flash...")
             self.flash_file_var.set(payload[0])
@@ -1616,6 +1635,22 @@ class App(tb.Window):
         if self._flash_cancel_event is not None:
             self._flash_cancel_event.set()
             self.flash_cancel_btn.config(state="disabled")
+
+    # ------------------------------------------------------------------
+    # update notice (no auto-updater - see update_check.py)
+    # ------------------------------------------------------------------
+
+    def _check_for_update(self):
+        def worker():
+            info = update_check.check_for_update(__version__)
+            if info:
+                self.msg_queue.put(("update_available", info))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_click(self, event=None):
+        if self._update_url:
+            webbrowser.open(self._update_url)
 
 
 def _fix_frozen_tcl_modules():
