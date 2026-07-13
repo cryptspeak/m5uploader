@@ -45,7 +45,7 @@ The full public firmware catalog, searchable and filterable by device, with cove
 
 ### My Firmware
 
-Everything published under your account: publish a new firmware or add a version to an existing one, edit metadata/files, toggle public/private visibility, delete a version, and create/rotate share codes.
+Everything published under your account: publish a new firmware or add a version to an existing one, edit metadata/files, toggle public/private visibility, delete a version, and create/rotate share codes. Cover images are stripped of all metadata (EXIF, ICC profile, XMP, text chunks) before they're compressed and sent - a phone photo's EXIF data can carry GPS coordinates, which would otherwise become public without you seeing it. Orientation is baked into the pixels first, so a stripped image doesn't come out sideways.
 
 ### Flash Firmware
 
@@ -147,6 +147,7 @@ m5uploader/
     gui.py             ttkbootstrap GUI (Account / Browse Firmware /
                         My Firmware / Flash Firmware)
     image_cache.py     Local cache of firmware cover images
+    imaging.py         Cover image compression (also strips EXIF/metadata)
     update_check.py    Passive "an update is available" notice (no auto-updater)
   esptool_helper.py     PyInstaller entry point for the bundled esptool helper
   run.py                PyInstaller entry point for the main app
