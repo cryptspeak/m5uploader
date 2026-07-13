@@ -24,9 +24,10 @@ import ttkbootstrap as tb
 from PIL import Image, ImageTk
 from ttkbootstrap.constants import BOTH, END, LEFT, RIGHT, X, Y, W
 from ttkbootstrap.dialogs import Messagebox
+from ttkbootstrap.widgets import ToolTip
 
 from . import (
-    __version__, auth_store, catalog_cache, config, firmware_cache, flashing, image_cache, update_check,
+    __version__, auth_store, catalog_cache, config, firmware_cache, flashing, image_cache, settings, update_check,
 )
 from .api import APIError, M5StackAPI
 
@@ -584,20 +585,24 @@ class ShareCodeDialog(tb.Toplevel):
 
 class App(tb.Window):
     def __init__(self):
-        super().__init__(title="m5uploader", themename=LIGHT_THEME, minsize=(900, 620))
+        self.dark_mode = settings.get_dark_mode()
+        super().__init__(
+            title="m5uploader", themename=DARK_THEME if self.dark_mode else LIGHT_THEME, minsize=(900, 620)
+        )
         self._size_to_screen()
 
         config.ensure_dirs()
 
         self.api = M5StackAPI()
         self.msg_queue = queue.Queue()
-        self.dark_mode = False
 
         self.username_var = tk.StringVar(value="Not logged in")
         self.search_var = tk.StringVar()
         self.category_var = tk.StringVar(value="All devices")
         self.version_var = tk.StringVar()
         self.progress_var = tk.DoubleVar(value=0)
+
+        self.count_downloads_var = tk.BooleanVar(value=settings.get_count_downloads())
 
         self.flash_port_var = tk.StringVar()
         self.flash_file_var = tk.StringVar()
@@ -695,6 +700,7 @@ class App(tb.Window):
     def _toggle_theme(self):
         self.dark_mode = not self.dark_mode
         self.style.theme_use(DARK_THEME if self.dark_mode else LIGHT_THEME)
+        settings.set_dark_mode(self.dark_mode)
 
     def _on_tab_changed(self, event):
         tab_text = event.widget.tab(event.widget.select(), "text")
@@ -864,10 +870,10 @@ class App(tb.Window):
         f = self.browse_tab
         f.columnconfigure(0, weight=3)
         f.columnconfigure(1, weight=2)
-        f.rowconfigure(1, weight=1)
+        f.rowconfigure(2, weight=1)
 
         toolbar = tb.Frame(f)
-        toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
 
         tb.Label(toolbar, text="Search").pack(side=LEFT)
         search_entry = tb.Entry(toolbar, textvariable=self.search_var, width=28)
@@ -889,12 +895,30 @@ class App(tb.Window):
             toolbar, text="Redeem share code...", bootstyle="secondary-outline", command=self._on_open_share_dialog
         ).pack(side=RIGHT, padx=(0, 8))
 
-        self.catalog_status = tb.Label(toolbar, text="", bootstyle="secondary")
-        self.catalog_status.pack(side=RIGHT, padx=12)
+        # Secondary row, below the main toolbar - catalog status and the
+        # download-counting toggle are informational, not actions, and
+        # crowding them into the primary toolbar row above caused the
+        # checkbox label to get clipped at ordinary window widths. This
+        # row has nothing else competing for space.
+        status_row = tb.Frame(f)
+        status_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+
+        self.catalog_status = tb.Label(status_row, text="", bootstyle="secondary")
+        self.catalog_status.pack(side=LEFT)
+
+        # Off by default - m5uploader never pings this unless the user
+        # turns it on. The tooltip carries the full explanation so the
+        # visible label can stay short.
+        count_check = tb.Checkbutton(
+            status_row, text="Count my downloads", variable=self.count_downloads_var,
+            bootstyle="secondary", command=self._on_toggle_count_downloads,
+        )
+        count_check.pack(side=RIGHT)
+        ToolTip(count_check, text="Counts downloads made via Download and Flash in this tab.")
 
         # -- list --
         list_frame = tb.Frame(f)
-        list_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
+        list_frame.grid(row=2, column=0, sticky="nsew", padx=(0, 12))
         list_frame.rowconfigure(0, weight=1)
         list_frame.columnconfigure(0, weight=1)
 
@@ -911,7 +935,7 @@ class App(tb.Window):
 
         # -- detail panel (scrollable so nothing gets clipped when the window is short) --
         detail_outer = tb.Labelframe(f, text="Details", padding=4)
-        detail_outer.grid(row=1, column=1, sticky="nsew")
+        detail_outer.grid(row=2, column=1, sticky="nsew")
         detail = self._make_scrollable(detail_outer)
 
         self.cover_label = tb.Label(detail)
@@ -1111,6 +1135,9 @@ class App(tb.Window):
         if not dest:
             return
 
+        fid = fw["fid"]
+        count_downloads = self.count_downloads_var.get()
+
         def worker():
             try:
                 self.progress_var.set(0)
@@ -1119,6 +1146,8 @@ class App(tb.Window):
                     self.msg_queue.put(("progress", frac * 100))
 
                 self.api.download_firmware(filename, dest, progress)
+                if count_downloads:
+                    self.api.ping_firmware_download(fid)
                 self.msg_queue.put(("info", f"Downloaded to {dest}"))
             except APIError as exc:
                 self.msg_queue.put(("error", str(exc)))
@@ -1150,6 +1179,9 @@ class App(tb.Window):
         firmware_cache.ensure_dir()
         self.flash_from_catalog_btn.config(state="disabled", text="Downloading...")
 
+        fid = fw["fid"]
+        count_downloads = self.count_downloads_var.get()
+
         def worker():
             try:
                 self.progress_var.set(0)
@@ -1158,6 +1190,8 @@ class App(tb.Window):
                     self.msg_queue.put(("progress", frac * 100))
 
                 self.api.download_firmware(filename, dest, progress)
+                if count_downloads:
+                    self.api.ping_firmware_download(fid)
                 firmware_cache.evict_if_needed()
                 self.msg_queue.put(("flash_from_catalog_ok", str(dest)))
             except APIError as exc:
@@ -1168,6 +1202,9 @@ class App(tb.Window):
     # ------------------------------------------------------------------
     # share-code redemption (Browse Firmware toolbar)
     # ------------------------------------------------------------------
+
+    def _on_toggle_count_downloads(self):
+        settings.set_count_downloads(self.count_downloads_var.get())
 
     def _on_open_share_dialog(self):
         if self._share_dialog is not None and self._share_dialog.winfo_exists():

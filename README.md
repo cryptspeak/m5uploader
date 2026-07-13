@@ -31,7 +31,7 @@ m5uploader is a from-scratch, from-first-principles reimplementation of the acco
 - **No embedded browser.** The GUI is native [ttkbootstrap](https://ttkbootstrap.readthedocs.io/) (themed `ttk`) - no Chromium, no Node, no remote page ever loaded into the app. Same look on Linux, Windows, and macOS, with a light/dark toggle.
 - **Password isn't stored.** Only the session token is persisted - in your OS keychain when one is actually available and working, otherwise (transparently, with no broken login) in a plain `0600`-permissioned file. See [Session token storage](#session-token-storage) below for details.
 - **Honest login state.** The saved token is checked on startup against an endpoint that actually requires auth, not just the public catalog. If it's no longer valid, you're asked to log in again instead of the UI pretending you're still logged in.
-- **No automatic telemetry.** `ping_firmware_download()` exists for the same analytics endpoint the official app pings on every download, but the GUI never calls it.
+- **No automatic telemetry.** `ping_firmware_download()` exists for the same download-count endpoint the official app pings on every download, but m5uploader only calls it if you turn on "Count my downloads" in the Browse Firmware toolbar - off by default.
 - **No OS-specific shell-outs.** Same codebase, same behavior on Linux, Windows, and macOS.
 - **No auto-updater.** m5uploader checks GitHub Releases for a newer version and shows a dismissible notice - it never downloads or runs anything on its own. An auto-updater is itself a remote-code-execution vector; you review and install updates yourself.
 
@@ -148,6 +148,8 @@ m5uploader/
                         My Firmware / Flash Firmware)
     image_cache.py     Local cache of firmware cover images
     imaging.py         Cover image compression (also strips EXIF/metadata)
+    settings.py        Small persisted preferences (currently: opt-in
+                        download counting)
     update_check.py    Passive "an update is available" notice (no auto-updater)
   esptool_helper.py     PyInstaller entry point for the bundled esptool helper
   run.py                PyInstaller entry point for the main app
