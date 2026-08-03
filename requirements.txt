@@ -1,6 +1,6 @@
 requests>=2.31,<3
 ttkbootstrap>=1.10,<2
-Pillow>=10,<12
+Pillow>=12,<13
 packaging>=23,<26
 
 # Flashing: pyserial is imported directly (MIT); esptool (GPLv2+) is only
